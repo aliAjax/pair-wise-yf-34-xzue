@@ -8,11 +8,12 @@ from app import ApiError, DroneAirspaceService, iso, utcnow
 class DroneFlowTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(); self.svc = DroneAirspaceService(Path(self.tmp.name) / "test.db"); self.start = utcnow() + timedelta(hours=2)
+        self.svc.create_model("reviewer", "airspace_reviewer", {"model_code": "M400", "cruise_speed_kmh": 60, "endurance_minutes": 60, "return_home_minutes": 10})
 
     def tearDown(self): self.tmp.cleanup()
 
     def plan(self, callsign="D100", route=None, risk=1, altitude=100):
-        return self.svc.create_plan("op-user", "operator", "OP1", {"callsign": callsign, "drone_model": "M400", "payload_kg": 5, "route": route or [[116.1, 39.8], [116.3, 39.9]], "starts_at": iso(self.start), "ends_at": iso(self.start + timedelta(hours=1)), "max_altitude": altitude, "population_risk": risk, "emergency_plan": "返回起降点", "region": "BJ"})
+        return self.svc.create_plan("op-user", "operator", "OP1", {"callsign": callsign, "drone_model": "M400", "model_code": "M400", "alternate_point": [115.95, 39.75], "payload_kg": 5, "route": route or [[116.1, 39.8], [116.3, 39.9]], "starts_at": iso(self.start), "ends_at": iso(self.start + timedelta(hours=1)), "max_altitude": altitude, "population_risk": risk, "emergency_plan": "返回起降点", "region": "BJ"})
 
     def test_full_approval_change_and_offline_reconciliation(self):
         plan = self.plan(); submitted = self.svc.submit(plan["id"], "op-user", "operator", "OP1", {})["plan"]
