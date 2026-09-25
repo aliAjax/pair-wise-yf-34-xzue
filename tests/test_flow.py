@@ -8,17 +8,18 @@ from app import ApiError, DroneAirspaceService, iso, utcnow
 class DroneFlowTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(); self.svc = DroneAirspaceService(Path(self.tmp.name) / "test.db"); self.start = utcnow() + timedelta(hours=2)
+        self.svc.create_aircraft_type("reviewer", "airspace_reviewer", {"code": "M400", "name": "四旋翼", "cruise_speed_kmh": 60, "endurance_minutes": 120, "return_minutes": 15})
 
     def tearDown(self): self.tmp.cleanup()
 
     def plan(self, callsign="D100", route=None, risk=1, altitude=100):
-        return self.svc.create_plan("op-user", "operator", "OP1", {"callsign": callsign, "drone_model": "M400", "payload_kg": 5, "route": route or [[116.1, 39.8], [116.3, 39.9]], "starts_at": iso(self.start), "ends_at": iso(self.start + timedelta(hours=1)), "max_altitude": altitude, "population_risk": risk, "emergency_plan": "返回起降点", "region": "BJ"})
+        return self.svc.create_plan("op-user", "operator", "OP1", {"callsign": callsign, "drone_model": "M400", "aircraft_type": "M400", "alternate_point": [116.4, 40.1], "payload_kg": 5, "route": route or [[116.1, 39.8], [116.3, 39.9]], "starts_at": iso(self.start), "ends_at": iso(self.start + timedelta(hours=1)), "max_altitude": altitude, "population_risk": risk, "emergency_plan": "返回起降点", "region": "BJ"})
 
     def test_full_approval_change_and_offline_reconciliation(self):
         plan = self.plan(); submitted = self.svc.submit(plan["id"], "op-user", "operator", "OP1", {})["plan"]
         check = self.svc.check_conflicts(plan["id"], "airspace_reviewer", "")
         self.assertTrue(check["approvable"])
-        approved = self.svc.approve(plan["id"], "reviewer", "airspace_reviewer", {"expected_revision": submitted["revision"], "offline_id": "offline-1", "reason": "路线和应急方案满足要求"})
+        approved = self.svc.approve(plan["id"], "reviewer", "airspace_reviewer", {"expected_revision": submitted["revision"], "offline_id": "offline-1", "reason": "路线和应急方案满足要求", "wind_factor": 1.2})
         self.assertEqual(approved["plan"]["status"], "approved")
         duplicate = self.svc.approve(plan["id"], "reviewer", "airspace_reviewer", {"expected_revision": submitted["revision"], "offline_id": "offline-1", "reason": "补传"})
         self.assertTrue(duplicate["idempotent"])
@@ -33,17 +34,17 @@ class DroneFlowTest(unittest.TestCase):
         check = self.svc.check_conflicts(plan["id"], "airspace_reviewer", "")
         self.assertFalse(check["approvable"])
         with self.assertRaises(ApiError) as ctx:
-            self.svc.approve(plan["id"], "reviewer", "airspace_reviewer", {"expected_revision": 1, "offline_id": "offline-2", "reason": "常规审核"})
+            self.svc.approve(plan["id"], "reviewer", "airspace_reviewer", {"expected_revision": 1, "offline_id": "offline-2", "reason": "常规审核", "wind_factor": 1.0})
         self.assertEqual(ctx.exception.code, "airspace_conflict")
-        override = self.svc.approve(plan["id"], "commander", "commander", {"expected_revision": 1, "offline_id": "offline-3", "reason": "紧急任务", "override_reason": "应急救援授权"})
+        override = self.svc.approve(plan["id"], "commander", "commander", {"expected_revision": 1, "offline_id": "offline-3", "reason": "紧急任务", "override_reason": "应急救援授权", "wind_factor": 1.0})
         self.assertEqual(override["plan"]["status"], "approved")
         conflicting = self.plan("D102", route=[[116.11, 39.81], [116.15, 39.84]])
         self.svc.submit(conflicting["id"], "op-user", "operator", "OP1", {})
         with self.assertRaises(ApiError) as ctx:
-            self.svc.approve(conflicting["id"], "reviewer", "airspace_reviewer", {"expected_revision": 1, "offline_id": "offline-4", "reason": "复核"})
+            self.svc.approve(conflicting["id"], "reviewer", "airspace_reviewer", {"expected_revision": 1, "offline_id": "offline-4", "reason": "复核", "wind_factor": 1.0})
         self.assertIn(ctx.exception.code, {"hard_constraint_violation", "airspace_conflict"})
         with self.assertRaises(ApiError) as ctx:
-            self.svc.approve(conflicting["id"], "reviewer", "airspace_reviewer", {"expected_revision": 99, "offline_id": "offline-5", "reason": "过期审核"})
+            self.svc.approve(conflicting["id"], "reviewer", "airspace_reviewer", {"expected_revision": 99, "offline_id": "offline-5", "reason": "过期审核", "wind_factor": 1.0})
         self.assertEqual(ctx.exception.code, "revision_conflict")
 
 
